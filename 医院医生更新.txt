@@ -1,0 +1,63 @@
+ public function thisList(){
+        $admincode = '5107030001';  #session获取当前医院代码
+        try {
+            # 连表，方便下面users根据这些字段进行判断是否有此医生，有不更新，没有更新
+            $ysxm = db('yslb')->field(['pym','username','did','admincode'])->where(['admincode'=>$admincode])->join('yi_ysxm','yi_ysxm.did = yi_yslb.id')->select();
+            # 获取医生类别
+            $yslb = db('yslb')->field(['pym','id as did'])->select();
+            # 需要过滤的，方便不同医院过滤，因为医院字段太多，而且每个医院不同，字段也不同
+            $field = [];
+            # 储存医生类别的键拼音码和值did（id，方便添加医生的时候是did）
+            $did = [];
+            # 拿当前登录的医院的第一行数据
+            $db = db('yy_'.$admincode)->find();
+            # 获取字段
+            $keys = array_keys($db);
+            foreach ($yslb as $key=>$value) {
+                if (!empty($db)) {
+                    # 如果当前字段存在获取字段的里面，就添加到下面要进行的过滤里面
+                    if (in_array($value['pym'],$keys)) {
+                        $field[] = $value['pym'];
+                    }
+                }
+                # 以拼音码为键，did为值
+                $did[$value['pym']] = $value['did'];
+            }
+            # 查询当前医院导入的数据
+            $dr = db('yy_'.$admincode)->field($field)->select();
+            # 需要更新的医生。
+            $users = [];
+            foreach ($dr as $key=>$value) {
+                # 根据上面过滤的字段。（比如导入的医院数据有，责任医生，责任护士，责任写了，责任护士没写，把写了名字的加入users数组，因为多行数据可能是同一个责任医生，后面要去重复）
+                foreach ($field as $v) {
+                    # 如果数据不为空进行粗添加（就是先把医生加入，最后再看是否重复）。
+                    if (!empty($value[$v]) && $value[$v] != '-' && !is_numeric($value[$v])) {
+                        $user['pym'] = $v;
+                        $user['username'] = $value[$v];
+                        $user['admincode'] = $admincode;
+                        $user['did'] = $did[$v];
+                        if (!in_array($user,$users)) {
+                            $users[] = $user;
+                        }
+                    }
+                }
+            }
+            # 根据上面粗添加的医生，进行筛选是否重复，如果重复就删除
+            foreach ($users as $z=>$a) {
+                if (in_array($a,$ysxm)) {
+                    unset($users[$z]);
+                };
+            }
+            if (count($users) < 1) {
+                return ['st'=>false,'msg'=>'没有需要更新的医生'];
+            }
+            # 筛选之后进行添加数据库
+            $st = $this->saveAll($users);
+            if ($st) {
+                return ['st'=>true,'msg'=>'更新成功'];
+            }
+        } catch (\Exception $e) {
+            return ['st'=>false,'msg'=>$e->getMessage()];
+        }
+
+    }
